@@ -1,7 +1,6 @@
 #include <map>
 // Core launcher logic: bundled UE4SS files, game detection, injection, mod management.
 #include "core.h"
-#include "unity.h"
 #include "classic.h"
 #include "updater.h"
 #include <tlhelp32.h>
@@ -601,7 +600,7 @@ void WatchTick() {
     if (!IsWatching()) { if (g_status == ST_WAITING) g_status = ST_IDLE; return; }
     std::wstring target = TargetExe();
     if (target.empty()) return;
-    if (IsUnityGame(target)) { if (g_status == ST_WAITING) g_status = ST_IDLE; return; }   // MelonLoader loads itself
+    if (IsUnityGame(target)) { if (g_status == ST_WAITING) g_status = ST_IDLE; return; }   // (not an Unreal game)
     if (ClassicGen(target)) { if (g_status == ST_WAITING) g_status = ST_IDLE; return; }    // Unreal 1-3: nothing to load
     if (g_status == ST_IDLE || g_status == ST_FAILED) g_status = ST_WAITING;
     std::wstring targetName = Lower(NameOf(target));
@@ -671,8 +670,7 @@ bool LaunchGame() {
         return true;
     }
     if (IsUnityGame(exe)) {
-        UnityInfo u = UnityDetect(exe);
-        Log(L"Starting " + NameOf(exe) + (u.mlInstalled && !u.mlDisabled ? L"... MelonLoader loads with it." : L" (MelonLoader isn't on, so no mods will load)."));
+        Log(L"Starting " + NameOf(exe) + L". It's a Unity game, so UE4SS isn't loaded into it.");
         return true;
     }
     Log(L"Starting " + NameOf(exe) + L"... UE4SS will load as soon as the game appears.");
@@ -878,4 +876,13 @@ DWORD FindProcessIdByPath(const std::wstring& exe) {
     } while (Process32NextW(snap, &pe));
     CloseHandle(snap);
     return found;
+}
+
+// A Unity game (UnityPlayer.dll or a <Name>_Data folder next to the exe): UE4SS can't load into those.
+bool IsUnityGame(const std::wstring& exe) {
+    if (exe.empty()) return false;
+    std::wstring dir = DirOf(exe);
+    if (GetFileAttributesW((dir + L"\\UnityPlayer.dll").c_str()) != INVALID_FILE_ATTRIBUTES) return true;
+    DWORD a = GetFileAttributesW((dir + L"\\" + StemOf(exe) + L"_Data").c_str());
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
 }

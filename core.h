@@ -83,3 +83,4 @@ void InstallZipAsync(const std::wstring& zip);
 void ReregisterUserMods();
 extern std::atomic<bool> g_modsDirty;
 extern std::atomic<bool> g_busy;
+bool IsUnityGame(const std::wstring& exe);   // a Unity game (not supported: Unreal only)

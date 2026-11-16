@@ -399,7 +399,7 @@ void UpdTick() {
     std::thread(InstallWorker).detach();
 }
 
-// ---- shared with the Unity / MelonLoader installer
+// ---- small download / unzip helpers (used by the model tools)
 bool NetGet(const std::wstring& url, std::string& out, std::string& err) { return HttpGet(url, out, err, false); }
 bool ZipExtract(const std::string& zipData, const std::wstring& outDir) { MakeDirs(outDir); return UnzipBuiltIn(zipData, outDir); }
 void DeleteFolderTree(const std::wstring& path) { DeleteTreeW(path); }

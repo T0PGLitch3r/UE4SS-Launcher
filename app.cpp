@@ -5,12 +5,6 @@
 #include "icons.h"
 #include "bridge.h"
 #include "updater.h"
-#include "unity.h"
-#ifdef LAUNCHER_DEV
-static const bool kUnity = true;    // Dev build: Unity games (MelonLoader / UnityExplorer)
-#else
-static const bool kUnity = false;   // normal build: Unreal only
-#endif
 #include "classic.h"
 #include <shellapi.h>
 #include <d3d11.h>
@@ -260,8 +254,7 @@ static void BuildFonts() {
 }
 
 // ================================================================ app state
-enum Page { PG_PLAY, PG_MODS, PG_LEVELS, PG_FREECAM, PG_EDITOR, PG_LOOK, PG_LOG, PG_PLAYER, PG_CHEATS, PG_UNITY, PG_MODELS };
-static std::wstring g_unityExe;   // the Unity game picked on the Unity page
+enum Page { PG_PLAY, PG_MODS, PG_LEVELS, PG_FREECAM, PG_EDITOR, PG_LOOK, PG_LOG, PG_PLAYER, PG_CHEATS, PG_MODELS };
 
 static int g_page = PG_PLAY;
 static std::vector<ProcInfo> g_procs;
@@ -336,7 +329,6 @@ static void Defer(std::function<void()> f) { g_deferred.push_back(std::move(f));
 static void SaveSettings() {
     auto W = [](const wchar_t* k, const std::wstring& v) { WritePrivateProfileStringW(L"Launcher", k, v.c_str(), g_iniPath.c_str()); };
     W(L"GameExe", g_gameExe);
-    W(L"UnityGame", g_unityExe);
     W(L"AutoInject", g_autoInject ? L"1" : L"0");
     W(L"UnrealOnly", g_ueOnly ? L"1" : L"0");
     W(L"Theme", U2W(kThemes[g_theme].name));
@@ -377,7 +369,6 @@ static void LoadSettings() {
     wchar_t buf[MAX_PATH * 2];
     auto G = [&](const wchar_t* k, const wchar_t* d) { GetPrivateProfileStringW(L"Launcher", k, d, buf, MAX_PATH * 2, g_iniPath.c_str()); return std::wstring(buf); };
     g_gameExe = G(L"GameExe", L"");
-    g_unityExe = G(L"UnityGame", L"");
     g_autoInject = G(L"AutoInject", L"0") == L"1";
     g_ueOnly = G(L"UnrealOnly", L"1") == L"1";
     std::string tn = W2U(G(L"Theme", L"Midnight"));
@@ -585,12 +576,8 @@ static void ChooseGame() {
     else if (int cg = ClassicGen(t)) {
         Log(L"Game set: " + ClassicGameName(t) + L". This is an " + U2W(ClassicGenName(cg)) + L" game; UE4SS only works with Unreal Engine 4 and 5, so mods and the in-game tools can't load into it.", LOG_WARN);
     }
-    else if (IsUnityGame(t) && !kUnity) {
-        Log(L"Game set: " + StemOf(t) + L". This is a Unity game; Unity games are only supported in UE4SS-Launcher-Dev.exe.", LOG_WARN);
-    }
     else if (IsUnityGame(t)) {
-        UnityInfo u = UnityDetect(t);
-        Log(L"Unity game set: " + StemOf(t) + L" (Unity " + U2W(u.unityVersion) + (u.il2cpp ? L", IL2CPP" : L", Mono") + L"). Use MelonLoader on the Play page.", LOG_OK);
+        Log(L"Game set: " + StemOf(t) + L". This is a Unity game; this launcher is for Unreal Engine games only.", LOG_WARN);
     }
     else if (!LooksUnreal(NameOf(t), t)) Log(L"This doesn't look like an Unreal Engine game exe (usually <Name>-Win64-Shipping.exe).", LOG_WARN);
     else Log(L"Game set: " + GameDisplayName(), LOG_OK);
@@ -725,216 +712,6 @@ static const char* StatusText(ImVec4& col) {
     }
 }
 
-// ---- Unity games: MelonLoader + the matching UnityExplorer
-static bool g_mlConfirmRemove = false;
-static void UnitySection(const std::wstring& exe) {
-    UnityInfo u = UnityDetect(exe);
-    UnityJob j = UnityGetJob();
-    if (j.phase == UJ_BUSY) g_framesLeft = 3;
-    SectionLabel("Unity game: MelonLoader");
-    BeginCard("unity", 0, 20, 18);
-    {
-        ImGui::PushStyleColor(ImGuiCol_Text, P.dim); ImGui::PushFont(F_small);
-        ImGui::Text("Unity %s   \xc2\xb7   %s   \xc2\xb7   %s", u.unityVersion.empty() ? "(version unknown)" : u.unityVersion.c_str(),
-                    u.il2cpp ? "IL2CPP" : "Mono", u.x64 ? "64-bit" : "32-bit");
-        ImGui::PopFont(); ImGui::PopStyleColor();
-        if (!u.antiCheat.empty()) {
-            ImGui::Dummy(ImVec2(0, Px(4)));
-            ImGui::PushStyleColor(ImGuiCol_Text, P.warn);
-            ImGui::TextWrapped(ICON_WARN "  This game uses %s. MelonLoader won't work with it, and modding an anti-cheat game online can get your account banned, so installing is turned off.", u.antiCheat.c_str());
-            ImGui::PopStyleColor();
-        }
-        ImGui::Dummy(ImVec2(0, Px(6)));
-        float bw = Px(150);
-        bool busy = j.phase == UJ_BUSY || !u.antiCheat.empty();
-        // MelonLoader
-        ImGui::PushFont(F_med); ImGui::TextUnformatted("MelonLoader"); ImGui::PopFont();
-        ImGui::SameLine(Px(170));
-        if (!u.mlInstalled) ImGui::TextColored(P.dim, "Not installed");
-        else if (u.mlDisabled) ImGui::TextColored(P.warn, ICON_POWER "  Installed (%s) but turned off", u.mlVersion.empty() ? "?" : u.mlVersion.c_str());
-        else ImGui::TextColored(P.ok, ICON_CHECK "  Installed  v%s", u.mlVersion.empty() ? "?" : u.mlVersion.c_str());
-        ImGui::BeginDisabled(busy);
-        if (!u.mlInstalled) { if (AccentButton(ICON_DOWNLOAD "  Install MelonLoader", ImVec2(Px(220), 0))) UnityInstallMelonLoader(exe); }
-        else {
-            if (ImGui::Button(ICON_ROTATE "  Update / reinstall", ImVec2(bw + Px(30), 0))) UnityInstallMelonLoader(exe);
-            ImGui::SameLine();
-            if (ImGui::Button(u.mlDisabled ? ICON_PLAY "  Turn on" : ICON_POWER "  Turn off", ImVec2(bw - Px(20), 0))) UnitySetMelonLoaderOn(exe, u.mlDisabled);
-            ImGui::SameLine();
-            if (!g_mlConfirmRemove) { if (GhostButton(ICON_TRASH "  Remove", ImVec2(bw - Px(30), 0))) g_mlConfirmRemove = true; }
-            else {
-                if (AccentButton("Remove MelonLoader?", ImVec2(bw + Px(40), 0))) { UnityRemoveMelonLoader(exe); g_mlConfirmRemove = false; }
-                ImGui::SameLine(); if (ImGui::Button("Cancel")) g_mlConfirmRemove = false;
-            }
-        }
-        ImGui::EndDisabled();
-        ImGui::Dummy(ImVec2(0, Px(8)));
-        // UnityExplorer
-        ImGui::PushFont(F_med); ImGui::TextUnformatted("UnityExplorer"); ImGui::PopFont();
-        ImGui::SameLine(Px(170));
-        if (u.explorerFile.empty()) ImGui::TextColored(P.dim, "Not installed");
-        else if (u.explorerWrong) ImGui::TextColored(P.warn, ICON_WARN "  Wrong build for this game (%s)", u.explorerFile.c_str());
-        else ImGui::TextColored(P.ok, ICON_CHECK "  Installed  (%s)", u.explorerFile.c_str());
-        ImGui::PushStyleColor(ImGuiCol_Text, P.dim); ImGui::PushFont(F_small);
-        ImGui::Text("Right build for this game: %s", u.explorerWant.c_str());
-        ImGui::PopFont(); ImGui::PopStyleColor();
-        ImGui::BeginDisabled(busy || !u.mlInstalled);
-        const char* lbl = u.explorerFile.empty() ? ICON_DOWNLOAD "  Install UnityExplorer" : (u.explorerWrong ? ICON_ROTATE "  Replace with the right build" : ICON_ROTATE "  Update UnityExplorer");
-        if (u.explorerFile.empty() || u.explorerWrong ? AccentButton(lbl, ImVec2(Px(260), 0)) : ImGui::Button(lbl, ImVec2(Px(260), 0))) UnityInstallExplorer(exe);
-        ImGui::EndDisabled();
-        if (!u.mlInstalled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Install MelonLoader first");
-        if (!u.explorerFile.empty() && !u.explorerWrong) { ImGui::SameLine(); ImGui::TextColored(P.dim, "Press F7 in the game to show / hide it"); }
-        ImGui::Dummy(ImVec2(0, Px(8)));
-        // folders
-        if (GhostButton(ICON_FOLDER_OPEN "  Mods folder")) { MakeDirs(u.gameDir + L"\\Mods"); OpenFolder(u.gameDir + L"\\Mods"); }
-        ImGui::SameLine();
-        if (GhostButton(ICON_FOLDER_OPEN "  Game folder")) OpenFolder(u.gameDir);
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!FileExists(u.gameDir + L"\\MelonLoader\\Latest.log"));
-        if (GhostButton(ICON_FILE_IMPORT "  MelonLoader log")) ShellExecuteW(nullptr, L"open", (u.gameDir + L"\\MelonLoader\\Latest.log").c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-        ImGui::EndDisabled();
-        // job state
-        if (busy) { ImGui::Dummy(ImVec2(0, Px(4))); ImGui::TextColored(P.accent, "%s", j.status.c_str()); }
-        else if (!j.error.empty()) { ImGui::Dummy(ImVec2(0, Px(4))); ImGui::TextColored(P.err, ICON_WARN "  %s", j.error.c_str()); }
-        else if (!j.done.empty()) { ImGui::Dummy(ImVec2(0, Px(4))); ImGui::TextColored(P.ok, ICON_CHECK "  %s", j.done.c_str()); }
-        ImGui::Dummy(ImVec2(0, Px(4)));
-        ImGui::PushStyleColor(ImGuiCol_Text, P.dim); ImGui::PushFont(F_small);
-        ImGui::TextWrapped("MelonLoader loads by itself whenever the game starts, from Steam or here. Put MelonLoader mods (.dll) in the Mods folder. "
-                           "The UE4SS tools (Player, Cheats, Levels, Freecam, Editor) are for Unreal games only.");
-        ImGui::PopFont(); ImGui::PopStyleColor();
-    }
-    EndCard();
-}
-
-// ---- Unity page: pick a Unity game (or one found on this PC), MelonLoader + UnityExplorer for it
-static std::mutex g_unityScanMx; static std::vector<std::pair<std::wstring, std::wstring>> g_unityFound;   // (name, exe)
-static std::atomic<int> g_unityScan{ 0 };
-static void ScanUnityGames() {
-    if (g_unityScan == 1) return;
-    g_unityScan = 1;
-    std::thread([] {
-        std::vector<std::wstring> libs;
-        // Steam libraries (from libraryfolders.vdf) + the usual places
-        for (auto steam : { L"C:\\Program Files (x86)\\Steam", L"C:\\Program Files\\Steam" }) {
-            std::string vdf; HANDLE h = CreateFileW((std::wstring(steam) + L"\\steamapps\\libraryfolders.vdf").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-            if (h == INVALID_HANDLE_VALUE) continue;
-            char b[8192]; DWORD n; while (ReadFile(h, b, sizeof b, &n, nullptr) && n) vdf.append(b, n); CloseHandle(h);
-            libs.push_back(std::wstring(steam) + L"\\steamapps\\common");
-            for (size_t p = vdf.find("\"path\""); p != std::string::npos; p = vdf.find("\"path\"", p + 1)) {
-                size_t a = vdf.find('"', p + 6), e = a == std::string::npos ? a : vdf.find('"', a + 1);
-                if (a == std::string::npos || e == std::string::npos) break;
-                std::string path = vdf.substr(a + 1, e - a - 1);
-                std::string clean; for (size_t i = 0; i < path.size(); i++) { if (path[i] == '\\' && i + 1 < path.size() && path[i + 1] == '\\') i++; clean += path[i]; }
-                libs.push_back(U2W(clean) + L"\\steamapps\\common");
-            }
-        }
-        for (wchar_t d = L'C'; d <= L'Z'; d++) {
-            std::wstring r = std::wstring(1, d) + L":\\";
-            if (GetDriveTypeW(r.c_str()) != DRIVE_FIXED) continue;
-            for (auto sub : { L"SteamLibrary\\steamapps\\common", L"Games", L"Epic Games", L"GOG Games", L"Program Files\\Epic Games", L"Program Files (x86)\\GOG Galaxy\\Games" }) libs.push_back(r + sub);
-        }
-        std::vector<std::pair<std::wstring, std::wstring>> found;
-        std::vector<std::wstring> seenLower;
-        for (auto& lib : libs) {
-            std::wstring ll = Lower(lib);
-            if (std::find(seenLower.begin(), seenLower.end(), ll) != seenLower.end()) continue;
-            seenLower.push_back(ll);
-            WIN32_FIND_DATAW fd; HANDLE h = FindFirstFileW((lib + L"\\*").c_str(), &fd);
-            if (h == INVALID_HANDLE_VALUE) continue;
-            do {
-                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == L'.') continue;
-                std::wstring gd = lib + L"\\" + fd.cFileName;
-                if (!FileExists(gd + L"\\UnityPlayer.dll")) continue;
-                // the exe that has a matching <Name>_Data folder
-                WIN32_FIND_DATAW fe; HANDLE h2 = FindFirstFileW((gd + L"\\*.exe").c_str(), &fe);
-                std::wstring exe;
-                if (h2 != INVALID_HANDLE_VALUE) {
-                    do {
-                        std::wstring stem = StemOf(fe.cFileName);
-                        if (DirExists(gd + L"\\" + stem + L"_Data")) { exe = gd + L"\\" + fe.cFileName; break; }
-                    } while (FindNextFileW(h2, &fe));
-                    FindClose(h2);
-                }
-                if (!exe.empty()) found.push_back({ fd.cFileName, exe });
-            } while (FindNextFileW(h, &fd));
-            FindClose(h);
-        }
-        std::sort(found.begin(), found.end(), [](auto& a, auto& b) { return Lower(a.first) < Lower(b.first); });
-        { std::lock_guard<std::mutex> lk(g_unityScanMx); g_unityFound = std::move(found); }
-        g_unityScan = 2; g_framesLeft = 3;
-    }).detach();
-}
-static void UnitySection(const std::wstring& exe);
-static void PageUnity() {
-    PageHeader("Unity games", "MelonLoader and the right UnityExplorer for Unity games. They load by themselves when the game starts.");
-    if (g_unityScan == 0) ScanUnityGames();
-    ImGui::BeginChild("unityscroll", ImVec2(0, 0), false);
-    // chosen game: the Unity page's own pick, or the Play page's game if that's a Unity game
-    std::wstring exe = g_unityExe;
-    if (exe.empty() && !TargetExe().empty() && IsUnityGame(TargetExe())) exe = TargetExe();
-    BeginCard("ugame", 0, 20, 18);
-    {
-        IconBox(ICON_CUBE, P.accent, Px(48));
-        ImGui::SameLine(0, Px(14));
-        ImGui::BeginGroup();
-        ImGui::PushFont(F_h2); ImGui::TextUnformatted(exe.empty() ? "No Unity game chosen" : W2U(StemOf(exe)).c_str()); ImGui::PopFont();
-        ImGui::PushStyleColor(ImGuiCol_Text, P.dim); ImGui::PushFont(F_small);
-        ImGui::TextUnformatted(exe.empty() ? "Pick one from the list below, or choose its .exe" : FitPath(W2U(exe), ImGui::GetContentRegionAvail().x - Px(200)).c_str());
-        ImGui::PopFont(); ImGui::PopStyleColor();
-        ImGui::EndGroup();
-        ImGui::SameLine(ImGui::GetContentRegionMax().x - Px(150));
-        if (ImGui::Button(ICON_FOLDER_OPEN "  Choose .exe", ImVec2(Px(150), 0))) {
-            Defer([] {
-                std::wstring f = PickFile(L"Game (*.exe)\0*.exe\0", L"Choose the Unity game's .exe", g_unityExe);
-                if (f.empty()) return;
-                if (!IsUnityGame(f)) { Log(L"That doesn't look like a Unity game (no UnityPlayer.dll or <Name>_Data folder next to it).", LOG_WARN); return; }
-                g_unityExe = f; SaveSettings();
-                UnityInfo u = UnityDetect(f);
-                Log(L"Unity game: " + StemOf(f) + L" (Unity " + U2W(u.unityVersion) + (u.il2cpp ? L", IL2CPP)" : L", Mono)"), LOG_OK);
-            });
-        }
-        if (!exe.empty()) {
-            ImGui::Dummy(ImVec2(0, Px(4)));
-            if (AccentButton(ICON_PLAY "   Launch game", ImVec2(-1, Px(44)), F_med)) {
-                STARTUPINFOW si{ sizeof(si) }; PROCESS_INFORMATION pi{}; std::wstring cmd = L"\"" + exe + L"\"";
-                if (CreateProcessW(exe.c_str(), &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, DirOf(exe).c_str(), &si, &pi)) {
-                    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
-                    UnityInfo u = UnityDetect(exe);
-                    Log(L"Starting " + NameOf(exe) + (u.mlInstalled && !u.mlDisabled ? L"... MelonLoader loads with it." : L" (MelonLoader isn't on, so no mods will load)."));
-                } else Log(L"Couldn't start the game (Steam games may need Steam running).", LOG_ERR);
-            }
-        }
-    }
-    EndCard();
-    if (!exe.empty()) { ImGui::Dummy(ImVec2(0, Px(4))); UnitySection(exe); }
-
-    ImGui::Dummy(ImVec2(0, Px(4)));
-    SectionLabel("Unity games on this PC");
-    BeginCard("ufound", 0, 16, 14);
-    {
-        if (g_unityScan != 2) ImGui::TextColored(P.dim, "Looking through your game folders...");
-        else {
-            std::lock_guard<std::mutex> lk(g_unityScanMx);
-            if (g_unityFound.empty()) ImGui::TextColored(P.dim, "None found in your Steam libraries or the usual game folders. Use Choose .exe.");
-            for (auto& g : g_unityFound) {
-                ImGui::PushID(W2U(g.second).c_str());
-                ImGui::AlignTextToFramePadding();
-                bool cur = Lower(g.second) == Lower(exe);
-                ImGui::TextColored(cur ? P.accent : P.text, "%s", W2U(g.first).c_str());
-                UnityInfo u = UnityDetect(g.second);
-                ImGui::SameLine(Px(300));
-                ImGui::TextColored(P.dim, "%s%s", u.il2cpp ? "IL2CPP" : "Mono", u.mlInstalled ? (u.mlDisabled ? "  \xc2\xb7  MelonLoader off" : "  \xc2\xb7  MelonLoader") : "");
-                ImGui::SameLine(ImGui::GetContentRegionMax().x - Px(90));
-                if (cur) ImGui::TextColored(P.ok, ICON_CHECK " Chosen");
-                else if (ImGui::Button("Choose", ImVec2(Px(90), 0))) { g_unityExe = g.second; SaveSettings(); }
-                ImGui::PopID();
-            }
-        }
-        if (g_unityScan == 2) { if (GhostButton(ICON_ROTATE "  Look again")) ScanUnityGames(); }
-    }
-    EndCard();
-    ImGui::EndChild();
-}
-
 static void PagePlay() {
     PageHeader("Play", "Launch your game with UE4SS and your mods loaded.");
 
@@ -986,7 +763,7 @@ static void PagePlay() {
         ImGui::EndDisabled();
 
         ImGui::Dummy(ImVec2(0, Px(2)));
-        if (unity || classic) { /* MelonLoader starts with the game by itself / Unreal 1-3: nothing to load */ }
+        if (unity || classic) { /* Unity / Unreal 1-3: nothing to load */ }
         else if (ToggleSwitch("##auto", &g_autoInject)) {
             SaveSettings();
             if (g_autoInject) {
@@ -1005,15 +782,6 @@ static void PagePlay() {
         }
     }
     EndCard();
-
-    if (kUnity && !TargetExe().empty() && IsUnityGame(TargetExe())) {
-        ImGui::Dummy(ImVec2(0, Px(4)));
-        UnitySection(TargetExe());
-        BeginCard("recent", 0, 16, 12);
-        ImGui::PushFont(F_small); LogLines(3, false); ImGui::PopFont();
-        EndCard();
-        return;
-    }
 
     // ---- running processes
     ImGui::Dummy(ImVec2(0, Px(4)));
@@ -1860,7 +1628,7 @@ static void Sidebar() {
     ImGui::Dummy(ImVec2(0, Px(14)));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, Px(4)));
     struct { const char* icon; const char* label; int page; } nav[] = {
-        { ICON_PLAY, "Play", PG_PLAY }, { ICON_CUBE, "Unity Games", kUnity ? PG_UNITY : -1 }, { ICON_USER, "Player", PG_PLAYER }, { ICON_BOLT, "Cheats", PG_CHEATS }, { ICON_PUZZLE, "Mods", PG_MODS }, { ICON_MAP, "Levels", PG_LEVELS }, { ICON_VIDEO, "Freecam", PG_FREECAM }, { ICON_PEN_RULER, "Editor", PG_EDITOR }, { ICON_BOX_OPEN, "Models", PG_MODELS },
+        { ICON_PLAY, "Play", PG_PLAY }, { ICON_USER, "Player", PG_PLAYER }, { ICON_BOLT, "Cheats", PG_CHEATS }, { ICON_PUZZLE, "Mods", PG_MODS }, { ICON_MAP, "Levels", PG_LEVELS }, { ICON_VIDEO, "Freecam", PG_FREECAM }, { ICON_PEN_RULER, "Editor", PG_EDITOR }, { ICON_BOX_OPEN, "Models", PG_MODELS },
         { ICON_PALETTE, "Appearance", PG_LOOK }, { ICON_LIST, "Activity", PG_LOG } };
     for (auto& n : nav) if (n.page >= 0 && NavItem(n.icon, n.label, g_page == n.page)) {
         g_page = n.page;
@@ -2504,7 +2272,6 @@ static void DrawUI() {
     case PG_EDITOR: PageEditor(); break;
     case PG_PLAYER: PagePlayer(); break;
     case PG_CHEATS: PageCheats(); break;
-    case PG_UNITY: if (kUnity) PageUnity(); else PagePlay(); break;
     case PG_LOOK: PageLook(); break;
     case PG_MODELS: PageModels(); break;
     case PG_LOG: PageLog(); break;

@@ -11,7 +11,7 @@ for f in imgui imgui_draw imgui_tables imgui_widgets; do [ -f obj/$f.o ] || $CXX
 for f in imgui_impl_win32 imgui_impl_dx11; do [ -f obj/$f.o ] || $CXX -c $IMGUI/backends/$f.cpp -o obj/$f.o; done
 x86_64-w64-mingw32-g++ -O2 -shared -static -s -municode -DUNICODE input_block.cpp -o res/LauncherInput.dll
 x86_64-w64-mingw32-windres app.rc -O coff -o obj/app.res
-for f in core bridge updater unity classic; do $CXX -Wall -Wno-unknown-pragmas -c $f.cpp -o obj/$f.o; done
+for f in core bridge updater classic; do $CXX -Wall -Wno-unknown-pragmas -c $f.cpp -o obj/$f.o; done
 $CXX -Wno-unknown-pragmas -Ithird_party/acl -Ithird_party/rtm -c models.cpp -o obj/models.o
 for f in simplifier allocator; do [ -f obj/mo_$f.o ] || $CXX -c third_party/meshopt/$f.cpp -o obj/mo_$f.o; done
 x86_64-w64-mingw32-gcc -O2 -c puff.c -o obj/puff.o

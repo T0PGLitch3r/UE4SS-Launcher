@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Builds UE4SS-Launcher.exe and UE4SS-Launcher-Dev.exe with MinGW-w64 (Linux, WSL or MSYS2).
+# Builds UE4SS-Launcher.exe with MinGW-w64 (Linux, WSL or MSYS2).
 # Needs: x86_64-w64-mingw32-g++ / gcc / windres, and Dear ImGui (fetched below into ./imgui).
 set -e
 cd "$(dirname "$0")"
 IMGUI=${IMGUI:-imgui}
 [ -f "$IMGUI/imgui.h" ] || git clone --depth 1 --branch v1.91.9 https://github.com/ocornut/imgui.git "$IMGUI"
-mkdir -p obj obj_dev
+mkdir -p obj
 CXX="x86_64-w64-mingw32-g++ -O2 -std=c++17 -municode -DUNICODE -D_UNICODE -DIMGUI_USER_CONFIG=\"imgui_user_config.h\" -I. -I$IMGUI -I$IMGUI/backends"
 for f in imgui imgui_draw imgui_tables imgui_widgets; do [ -f obj/$f.o ] || $CXX -c $IMGUI/$f.cpp -o obj/$f.o; done
 for f in imgui_impl_win32 imgui_impl_dx11; do [ -f obj/$f.o ] || $CXX -c $IMGUI/backends/$f.cpp -o obj/$f.o; done
@@ -19,7 +19,4 @@ x86_64-w64-mingw32-gcc -O2 -c puff.c -o obj/puff.o
 $CXX -Wall -Wno-unknown-pragmas -c app.cpp -o obj/app.o
 LIBS="-ld3d11 -ld3dcompiler_47 -ldxgi -ldwmapi -lcomdlg32 -lshlwapi -lshell32 -lole32 -luuid -lgdi32 -limm32 -lwinhttp -lbcrypt -lwinmm -lwindowscodecs -ldxguid -s"
 $CXX -mwindows -static obj/*.o obj/app.res -o UE4SS-Launcher.exe $LIBS
-# Dev build: the same launcher plus the Unity games page (MelonLoader / UnityExplorer)
-$CXX -Wall -Wno-unknown-pragmas -DLAUNCHER_DEV -c app.cpp -o obj_dev/app.o
-$CXX -mwindows -static $(ls obj/*.o | grep -v '/app.o$') obj_dev/app.o obj/app.res -o UE4SS-Launcher-Dev.exe $LIBS
-ls -la UE4SS-Launcher.exe UE4SS-Launcher-Dev.exe
+ls -la UE4SS-Launcher.exe

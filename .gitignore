@@ -1,5 +1,4 @@
 obj/
-obj_dev/
 imgui/
 *.exe
 res/LauncherInput.dll

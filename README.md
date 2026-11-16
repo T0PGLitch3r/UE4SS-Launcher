@@ -40,9 +40,6 @@ A Windows launcher and **in-game editor** for single-player Unreal Engine games.
 - Imported models belong to the game you imported them for. Each game has its own models folder.
 - A material library and a texture library, so you can reuse looks across models.
 
-### Dev build
-`UE4SS-Launcher-Dev.exe` is the same launcher plus a Unity games page (MelonLoader / UnityExplorer).
-
 ---
 
 ## What we've done (recent work)
@@ -70,7 +67,7 @@ You need MinGW-w64 (`x86_64-w64-mingw32-g++`) on Linux, WSL or MSYS2.
 ./build.sh
 ```
 
-The script downloads Dear ImGui into `./imgui` the first time, then builds `UE4SS-Launcher.exe` and `UE4SS-Launcher-Dev.exe`. The UE4SS files in `bundle/` and the fonts and icons in `res/` are packed into the exe, so it runs on its own.
+The script downloads Dear ImGui into `./imgui` the first time, then builds `UE4SS-Launcher.exe`. The UE4SS files in `bundle/` and the fonts and icons in `res/` are packed into the exe, so it runs on its own.
 
 ## Credits
 
